@@ -86,6 +86,74 @@ endif
 "   equal or greater indent.
 " exclusive : bool
 "   true: Motion is exclusive; false: Motion is inclusive
+function! s:_get_next(first_line_of_current_range, last_line_of_current_range, fwd, target_indent_depth, reference_indent, exclusive, count)
+    let stepvalue = a:fwd ? 1 : -1
+
+    let skip_blanks = get(b:, "indentwise_skip_blanks", get(g:, "indentwise_skip_blanks", 1))
+    let blanks_have_null_indentation = get(b:, "indentwise_blanks_have_null_indentation", get(g:, "indentwise_blanks_have_null_indentation", 1))
+    let treat_whitespace_as_blank = get(b:, "indentwise_treat_whitespace_as_blank", get(g:, "indentwise_treat_whitespace_as_blank", 1))
+
+    if a:fwd
+        let stepvalue = 1
+        let current_line = a:last_line_of_current_range
+    else
+        let stepvalue = -1
+        let current_line = a:first_line_of_current_range
+    endif
+     
+    let start_line = current_line
+    let last_accepted_line = current_line
+    let last_line_of_buffer = line('$')
+    let current_indent = indent(current_line)
+    let indent_depth_changed = 0
+    let num_reps = a:count
+    while (current_line > 0 && current_line <= last_line_of_buffer && num_reps > 0)
+        let current_line = current_line + stepvalue
+        let candidate_line_indent = indent(current_line)
+        let accept_line = 0
+
+        if treat_whitespace_as_blank
+            let blank_line = empty(matchstr(getline(current_line), '[^\s]'))
+        else
+            let blank_line = empty(getline(current_line))
+        endif
+
+        if blank_line && blanks_have_null_indentation
+            let indent_depth_changed = 1
+        elseif (candidate_line_indent == current_indent)
+            if !skip_blanks || !blank_line
+                if l:indent_depth_changed || !g:indentwise_equal_indent_skips_contiguous
+                    let accept_line = 1
+                    let indent_depth_changed = 0
+                else
+                    let last_accepted_line = current_line
+                endif
+            endif
+        elseif (candidate_line_indent != current_indent)
+            if (candidate_line_indent <= current_indent)
+                let accept_line = 1
+                let indent_depth_changed = 1
+            endif
+        endif
+
+        if accept_line
+            if !skip_blanks || !blank_line
+                let num_reps = num_reps - 1
+                let current_indent = candidate_line_indent
+                let last_accepted_line = current_line
+            endif
+        endif
+    endwhile
+    if last_accepted_line == start_line
+        return -1
+    else
+        if (a:exclusive)
+            let last_accepted_line = last_accepted_line - stepvalue
+        endif
+        return last_accepted_line
+    endif
+endfunction
+
 function! s:_get_line_of_relative_indent(first_line_of_current_range, last_line_of_current_range, fwd, target_indent_depth, reference_indent, exclusive, count)
     let stepvalue = a:fwd ? 1 : -1
 
@@ -221,6 +289,21 @@ endfunction
 function! <SID>move_to_indent_depth(fwd, target_indent_depth, exclusive, vim_mode) range
     let current_column = col('.')
     let target_line = s:_get_line_of_relative_indent(a:firstline, a:lastline, a:fwd, a:target_indent_depth, -1, a:exclusive, v:count1)
+    if a:vim_mode == "v"
+        normal! gv
+    endif
+    if target_line > 0
+        let preserve_col_pos = get(b:, "indentwise_preserve_col_pos", get(g:, "indentwise_preserve_col_pos", 0))
+        if preserve_col_pos
+            execute "normal! " . target_line . "G" . current_column . "|"
+        else
+            execute "normal! " . target_line . "G^"
+        endif
+    endif
+endfunction
+function! <SID>move_to_indent_depthKamou(fwd, target_indent_depth, exclusive, vim_mode) range
+    let current_column = col('.')
+    let target_line = s:_get_next(a:firstline, a:lastline, a:fwd, a:target_indent_depth, -1, a:exclusive, v:count1)
     if a:vim_mode == "v"
         normal! gv
     endif
@@ -402,6 +485,7 @@ nnoremap <silent> <Plug>(IndentWisePreviousLesserIndent)    :<C-U>call <SID>move
 vnoremap <silent> <Plug>(IndentWisePreviousLesserIndent)         :call <SID>move_to_indent_depth(0,  "<", 0, "v")<CR>
 onoremap <silent> <Plug>(IndentWisePreviousLesserIndent)   V:<C-U>call <SID>move_to_indent_depth(0,  "<", 1, "o")<CR>
 
+nnoremap <silent> <Plug>(IndentWisePreviousEqualIndentKamou)     :<C-U>call <SID>move_to_indent_depthKamou(0, "==", 0, "n")<CR>
 nnoremap <silent> <Plug>(IndentWisePreviousEqualIndent)     :<C-U>call <SID>move_to_indent_depth(0, "==", 0, "n")<CR>
 vnoremap <silent> <Plug>(IndentWisePreviousEqualIndent)          :call <SID>move_to_indent_depth(0, "==", 0, "v")<CR>
 onoremap <silent> <Plug>(IndentWisePreviousEqualIndent)    V:<C-U>call <SID>move_to_indent_depth(0, "==", 1, "o")<CR>
@@ -414,6 +498,7 @@ nnoremap <silent> <Plug>(IndentWiseNextLesserIndent)        :<C-U>call <SID>move
 vnoremap <silent> <Plug>(IndentWiseNextLesserIndent)             :call <SID>move_to_indent_depth(1,  "<", 0, "v")<CR>
 onoremap <silent> <Plug>(IndentWiseNextLesserIndent)       V:<C-U>call <SID>move_to_indent_depth(1,  "<", 1, "o")<CR>
 
+nnoremap <silent> <Plug>(IndentWiseNextEqualIndentKamou)         :<C-U>call <SID>move_to_indent_depthKamou(1, "==", 0, "n")<CR>
 nnoremap <silent> <Plug>(IndentWiseNextEqualIndent)         :<C-U>call <SID>move_to_indent_depth(1, "==", 0, "n")<CR>
 vnoremap <silent> <Plug>(IndentWiseNextEqualIndent)              :call <SID>move_to_indent_depth(1, "==", 0, "v")<CR>
 onoremap <silent> <Plug>(IndentWiseNextEqualIndent)        V:<C-U>call <SID>move_to_indent_depth(1, "==", 1, "o")<CR>
